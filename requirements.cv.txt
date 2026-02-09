@@ -1,0 +1,6 @@
+opencv-python==4.10.0.84
+numpy>=1.21.0,<2.0.0
+requests==2.32.3
+PyYAML==6.0.2
+ultralytics==8.3.34
+torch>=2.2.0

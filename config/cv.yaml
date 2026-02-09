@@ -1,0 +1,37 @@
+camera:
+  index: 0              # MacBook camera (0)
+  width: 1280
+  height: 720
+  fps: 30
+
+yolo:
+  model: "yolov8n.pt"   # lightweight, good for CPU
+  conf: 0.2
+  iou: 0.45
+  device: "cpu"         # "cpu" or "0" for GPU
+
+# For testing with books/pens:
+# COCO has "book" but not "pen". We'll use "book" + "cell phone" as a small-object stand-in.
+detect_classes:
+  - "book"
+  - "cell phone"
+
+# If you prefer: detect everything (more CPU cost)
+detect_classes: []
+
+logic:
+  process_every_n_frames: 2
+  min_stable_frames: 5          # debounce: require stable change
+  # publish_events: true
+  publish_events: false
+
+runtime:
+  show_window: true
+  print_events: true
+  save_video: false
+  save_debug_frames: false
+
+backend:
+  base_url: "http://localhost:8000"
+  cv_event_path: "/api/events/cv"
+  timeout_seconds: 2

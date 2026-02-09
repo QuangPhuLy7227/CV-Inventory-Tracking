@@ -9,3 +9,4 @@ class ZoneType(str, Enum):
 class InventoryObjectType(str, Enum):
     filament_spool = "filament_spool"
     printer = "printer"
+    generic_object = "generic_object" 

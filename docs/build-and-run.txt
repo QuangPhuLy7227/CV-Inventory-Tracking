@@ -21,3 +21,32 @@ curl -X POST http://localhost:8000/api/events/cv \
 curl -X POST http://localhost:8000/api/confirmations/<PENDING_ID>/confirm \
   -H "Content-Type: application/json" \
   -d '{"resolved_by":"worker_1","object_id":"SPOOL-1"}'
+
+
+
+
+
+
+# Phase 2 (with live view + backend integration)
+Terminal 1: run backend (Phase 1)
+uvicorn backend.main:app --reload --port 8000
+
+Terminal 2: create zones quickly (optional)
+python -m cv.tools.zone_editor
+
+
+Draw two rectangles (left/right), press s to save.
+
+Terminal 3: run CV service (live window)
+python -m cv.main
+
+
+Now:
+
+put a book into Zone_Left → count changes → CV posts an event
+
+move it to Zone_Right → CV infers transfer → posts /api/events/cv
+
+check pending confirmations:
+
+curl http://localhost:8000/api/confirmations/pending

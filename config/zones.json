@@ -1,0 +1,22 @@
+{
+  "zones": [
+    {
+      "zone_id": "Zone_Left",
+      "type": "rack_slot",
+      "shape": "rect",
+      "x1": 40,
+      "y1": 80,
+      "x2": 620,
+      "y2": 680
+    },
+    {
+      "zone_id": "Zone_Right",
+      "type": "printer_mount",
+      "shape": "rect",
+      "x1": 660,
+      "y1": 80,
+      "x2": 1240,
+      "y2": 680
+    }
+  ]
+}
