@@ -1,0 +1,23 @@
+# Phase 1
+1. Run server
+uvicorn backend.main:app --reload --port 8000
+
+2. Add zones (example)
+curl -X POST http://localhost:8000/api/zones \
+  -H "Content-Type: application/json" \
+  -d '{"zone_id":"Rack_A_Slot_1","zone_type":"rack_slot"}'
+
+3. Create a spool in Rack_A_Slot_1
+curl -X POST http://localhost:8000/api/spools \
+  -H "Content-Type: application/json" \
+  -d '{"spool_id":"SPOOL-1","zone_id":"Rack_A_Slot_1","material":"PLA","color":"Black"}'
+
+4. Simulate a CV movement event (creates pending)
+curl -X POST http://localhost:8000/api/events/cv \
+  -H "Content-Type: application/json" \
+  -d '{"object_type":"filament_spool","from_zone":"Rack_A_Slot_1","to_zone":"Printer_P3_Mount","confidence":0.7}'
+
+5. Confirm it manually (commit)
+curl -X POST http://localhost:8000/api/confirmations/<PENDING_ID>/confirm \
+  -H "Content-Type: application/json" \
+  -d '{"resolved_by":"worker_1","object_id":"SPOOL-1"}'
