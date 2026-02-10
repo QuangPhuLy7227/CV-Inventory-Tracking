@@ -1,0 +1,8 @@
+path: datasets/inventory_v1
+train: images/train
+val: images/val
+test: images/test
+
+names:
+  0: filament_spool
+  1: printer

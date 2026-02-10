@@ -25,11 +25,11 @@ logic:
   # publish_events: true
   publish_events: false
 
-runtime:
-  show_window: true
-  print_events: true
-  save_video: false
-  save_debug_frames: false
+# runtime:
+#   show_window: true
+#   print_events: true
+#   save_video: false
+#   save_debug_frames: false
 
 backend:
   base_url: "http://localhost:8000"
