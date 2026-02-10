@@ -8,6 +8,7 @@ Phase 1 builds the inventory truth model + backend APIs.
 ```bash
 pip install -r requirements.txt
 uvicorn backend.main:app --reload --port 8000
+```
 
 # Inventory Tracking - Phase 2
 
@@ -18,3 +19,15 @@ Phase 2 builds Computer Visin model.
 ## Run
 ```bash
 python -m cv.main
+```
+
+# Phase 3 - No None gap
+- Phase 3 adding the feature for no none gap when switching between zones
+- And add functionalities to detect object entering or exiting events
+
+# Phase 4 - Training YOLO
+- Start with the generic YOLOv8 model
+- Collect images through 3 ways: self collection with video capturing, manual import, or downloading from an url
+- Labeling using Roboflow Annotate
+- Prep data using scikit learn
+- Infer live for testing
