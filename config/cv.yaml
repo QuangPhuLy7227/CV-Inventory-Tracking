@@ -25,6 +25,12 @@ logic:
   # publish_events: true
   publish_events: false
 
+qr:
+  enabled: true
+  decode_every_n_frames: 2
+  roi_pad_px: 14
+  draw_overlay: true
+
 # runtime:
 #   show_window: true
 #   print_events: true

@@ -31,3 +31,10 @@ python -m cv.main
 - Labeling using Roboflow Annotate
 - Prep data using scikit learn
 - Infer live for testing
+
+# Phase 5 - Adding QR Reader
+- Using QR-pillow to generate QR from JSON
+- Decode QR using OpenCV
+```bash
+python -m training.test_qr_live
+```

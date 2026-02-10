@@ -6,6 +6,7 @@ from cv.tracking.zone_mapper import assign_to_zones, count_by_zone
 from cv.tracking.state_tracker import ZoneStateTracker, infer_transfers
 from cv.utils.draw import draw_rect_zone, draw_bbox
 from cv.tracking.simple_tracker import SimpleTracker
+from cv.qr.qr_reader import QRReader
 
 
 def load_yaml(path):
@@ -47,6 +48,17 @@ class CVPipeline:
             self.zones,
             min_stable_frames=int(cfg["logic"]["min_stable_frames"]),
         )
+
+        # QR code reader
+        self.qr_cfg = cfg.get("qr", {}) or {}
+        self.qr_enabled = bool(self.qr_cfg.get("enabled", False))
+        self.qr_every_n = int(self.qr_cfg.get("decode_every_n_frames", 2))
+        self.qr_pad = int(self.qr_cfg.get("roi_pad_px", 14))
+        self.qr_draw = bool(self.qr_cfg.get("draw_overlay", True))
+        self.qr_reader = QRReader() if self.qr_enabled else None
+
+        # cache last known QR per track so you don't need to decode every frame
+        self.track_qr_cache = {}  # track_id -> {"raw": str, "payload": dict}
 
         # Publisher is optional, and imported only if needed
         self.publisher = None
@@ -103,6 +115,14 @@ class CVPipeline:
         print("[DEBUG tracks]", [(t["track_id"], t["label"], t.get("prev_zone_id"), t.get("zone_id")) for t in tracks_out])
         print("[DEBUG events]", "T=", len(transfers), "E=", len(enters), "X=", len(exits))
 
+        # --- QR decode step (ROI-based, fast) ---
+        if self.qr_enabled and self.qr_reader is not None and (self.frame_i % self.qr_every_n == 0):
+            for t in tracks_out:
+                tid = t["track_id"]
+                raw, payload = self.qr_reader.decode_roi(frame_bgr, t["bbox"], pad=self.qr_pad)
+                if raw:
+                    self.track_qr_cache[tid] = {"raw": raw, "payload": payload}
+
         debug["transfers"] = transfers
         debug["enters"] = enters
         debug["exits"] = exits
@@ -112,7 +132,21 @@ class CVPipeline:
         # for d in dets:
         #     draw_bbox(annotated, d["bbox"], d["label"], d["conf"])
         for t in tracks_out:
-            draw_bbox(annotated, t["bbox"], f"#{t['track_id']} {t['label']}", t["conf"])
+            tid = t["track_id"]
+            label = t["label"]
+            cache = self.track_qr_cache.get(tid)
+
+            if self.qr_draw and cache:
+                # show ID if JSON payload, else show "QR"
+                qid = None
+                if isinstance(cache.get("payload"), dict):
+                    qid = cache["payload"].get("id")
+                if qid:
+                    label = f"#{tid} {t['label']} QR:{qid}"
+                else:
+                    label = f"#{tid} {t['label']} QR"
+
+            draw_bbox(annotated, t["bbox"], label, t["conf"])
 
         # 5) Zone counts (use tracked objects for stability)
         counts = {z["zone_id"]: 0 for z in self.zones}
@@ -163,19 +197,22 @@ class CVPipeline:
             # 1) Publish TRACK-LEVEL events (best signal)
             for e in enters:
                 try:
+                    hinted_id, qr_meta = self._qr_meta_for_track(e["track_id"])
+                    meta = {
+                        "source": "phase2",
+                        "mode": "enter",
+                        "label": e["label"],
+                        "track_id": e["track_id"],
+                        "reason": e.get("reason"),
+                        **qr_meta,
+                    }
                     resp = self.publisher.publish_zone_change(
                         object_type=self.object_type,
                         from_zone=None,
                         to_zone=e["to_zone"],
                         hinted_object_id=None,
                         confidence=0.6,
-                        meta={
-                            "source": "phase2",
-                            "mode": "enter",
-                            "label": e["label"],
-                            "track_id": e["track_id"],
-                            "reason": e.get("reason"),
-                        },
+                        meta=meta,
                     )
                     debug["published"].append(resp)
                 except Exception as ex:
@@ -183,19 +220,22 @@ class CVPipeline:
 
             for x in exits:
                 try:
+                    hinted_id, qr_meta = self._qr_meta_for_track(e["track_id"])
+                    meta = {
+                        "source": "phase2",
+                        "mode": "enter",
+                        "label": e["label"],
+                        "track_id": e["track_id"],
+                        "reason": e.get("reason"),
+                        **qr_meta,
+                    }
                     resp = self.publisher.publish_zone_change(
                         object_type=self.object_type,
                         from_zone=x["from_zone"],
                         to_zone=None,
                         hinted_object_id=None,
                         confidence=0.6,
-                        meta={
-                            "source": "phase2",
-                            "mode": "exit",
-                            "label": x["label"],
-                            "track_id": x["track_id"],
-                            "reason": x.get("reason"),
-                        },
+                        meta=meta,
                     )
                     debug["published"].append(resp)
                 except Exception as ex:
@@ -203,19 +243,22 @@ class CVPipeline:
 
             for t in transfers:
                 try:
+                    hinted_id, qr_meta = self._qr_meta_for_track(e["track_id"])
+                    meta = {
+                        "source": "phase2",
+                        "mode": "enter",
+                        "label": e["label"],
+                        "track_id": e["track_id"],
+                        "reason": e.get("reason"),
+                        **qr_meta,
+                    }
                     resp = self.publisher.publish_zone_change(
                         object_type=self.object_type,
                         from_zone=t["from_zone"],
                         to_zone=t["to_zone"],
                         hinted_object_id=None,
                         confidence=0.7,
-                        meta={
-                            "source": "phase2",
-                            "mode": "transfer",
-                            "label": t["label"],
-                            "track_id": t["track_id"],
-                            "reason": t.get("reason"),
-                        },
+                        meta=meta,
                     )
                     debug["published"].append(resp)
                 except Exception as ex:
@@ -251,6 +294,11 @@ class CVPipeline:
                     print(f"[CV] EXIT   #{x['track_id']} {x['label']} {x['from_zone']} -> OUTSIDE ({x.get('reason')})")
                 for t in transfers:
                     print(f"[CV] TRANSFER #{t['track_id']} {t['label']} {t['from_zone']} -> {t['to_zone']} ({t.get('reason')})")
+                
+                hinted_id, _ = self._qr_meta_for_track(t["track_id"])
+                qr_txt = f" QR:{hinted_id}" if hinted_id else ""
+                print(f"[CV] TRANSFER #{t['track_id']} {t['label']}{qr_txt} {t['from_zone']} -> {t['to_zone']} ({t.get('reason')})")
+            
             for r in residual:
                 if r["mode"] == "appearance":
                     print(f"[CV] APPEAR {r['to_zone']} ({r['old']} -> {r['new']})")
@@ -258,3 +306,20 @@ class CVPipeline:
                     print(f"[CV] DISAPPEAR {r['from_zone']} ({r['old']} -> {r['new']})")
 
         return annotated, debug
+    
+    def _qr_meta_for_track(self, track_id: int):
+        cache = self.track_qr_cache.get(track_id)
+        if not cache:
+            return None, {}
+
+        payload = cache.get("payload")
+        raw = cache.get("raw")
+
+        hinted_id = None
+        meta = {"qr_raw": raw}
+
+        if isinstance(payload, dict):
+            hinted_id = payload.get("id")  # we expect {"id":"PRUSA-01", ...}
+            meta["qr_payload"] = payload
+
+        return hinted_id, meta
