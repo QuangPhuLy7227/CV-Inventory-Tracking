@@ -1,65 +1,64 @@
 import os
+import random
 import shutil
-from sklearn.model_selection import train_test_split
+from pathlib import Path
 
-def ensure_dir(p):
-    os.makedirs(p, exist_ok=True)
+IMG_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+
+def ensure_dir(p: Path):
+    p.mkdir(parents=True, exist_ok=True)
 
 def main(
     base="datasets/inventory_v1",
     images_all="datasets/inventory_v1/images/all",
     labels_all="datasets/inventory_v1/labels/all",
-    test_size=0.10,
-    val_size=0.15,
-    seed=42
+    test_ratio=0.10,
+    val_ratio=0.15,
+    seed=42,
 ):
-    # target dirs
-    for split in ["train", "val", "test"]:
-        ensure_dir(os.path.join(base, "images", split))
-        ensure_dir(os.path.join(base, "labels", split))
+    random.seed(seed)
+    base = Path(base)
+    images_all = Path(images_all)
+    labels_all = Path(labels_all)
 
-    imgs = sorted([f for f in os.listdir(images_all) if f.lower().endswith((".jpg",".jpeg",".png"))])
-    if not imgs:
-        raise RuntimeError(f"No images found in {images_all}")
-    
-    # keep only those with matching label files
+    # Target dirs
+    for split in ["train", "val", "test"]:
+        ensure_dir(base / "images" / split)
+        ensure_dir(base / "labels" / split)
+
+    # Find image/label pairs
     pairs = []
-    for img in imgs:
-        stem = os.path.splitext(img)[0]
-        lab = stem + ".txt"
-        if os.path.exists(os.path.join(labels_all, lab)):
-            pairs.append((img, lab))
+    for img_path in images_all.iterdir():
+        if not img_path.is_file() or img_path.suffix.lower() not in IMG_EXTS:
+            continue
+        label_path = labels_all / (img_path.stem + ".txt")
+        if label_path.exists():
+            pairs.append((img_path, label_path))
 
     if not pairs:
-        raise RuntimeError("No image/label pairs found. Make sure labels exist in labels/all.")
-    
-    X = [p[0] for p in pairs]
-    y = [p[1] for p in pairs]
+        raise RuntimeError("No image/label pairs found. Did you label and save YOLO .txt files?")
 
-    # split
-    X_trainval, X_test, y_trainval, y_test = train_test_split(
-        X, y, test_size=test_size, random_state=seed
-    )
-    # val is fraction of trainval
-    val_frac = val_size / (1.0 - test_size)
-    X_train, X_val, y_train, y_val = train_test_split(
-        X_trainval, y_trainval, test_size=val_frac, random_state=seed
-    )
+    random.shuffle(pairs)
 
-    splits = {
-        "train": (X_train, y_train),
-        "val": (X_val, y_val),
-        "test": (X_test, y_test),
-    }
+    n = len(pairs)
+    n_test = int(n * test_ratio)
+    n_val = int(n * val_ratio)
 
-    for split, (xs, ys) in splits.items():
-        for img, lab in zip(xs, ys):
-            shutil.copy2(os.path.join(images_all, img), os.path.join(base, "images", split, img))
-            shutil.copy2(os.path.join(labels_all, lab), os.path.join(base, "labels", split, lab))
+    test_pairs = pairs[:n_test]
+    val_pairs = pairs[n_test:n_test + n_val]
+    train_pairs = pairs[n_test + n_val:]
+
+    splits = {"train": train_pairs, "val": val_pairs, "test": test_pairs}
+
+    # Copy
+    for split, spairs in splits.items():
+        for img_path, label_path in spairs:
+            shutil.copy2(img_path, base / "images" / split / img_path.name)
+            shutil.copy2(label_path, base / "labels" / split / label_path.name)
 
     print("Split complete:")
-    for split in splits:
-        print(split, "=", len(splits[split][0]))
+    for split, spairs in splits.items():
+        print(f"  {split}: {len(spairs)}")
 
 if __name__ == "__main__":
     main()

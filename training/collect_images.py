@@ -11,6 +11,8 @@ def main(
     os.makedirs(out_dir, exist_ok=True)
 
     cap = cv2.VideoCapture(cam_index)
+    # cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+    # cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
     if not cap.isOpened():
         raise RuntimeError("Cannot open camera. Try cam_index=1 or check permissions.")
     

@@ -1,0 +1,289 @@
+Below is a **step-by-step, copy/paste friendly** workflow to **train, evaluate, and test** your YOLOv8 model for **one class: `filament_spool`** on your Mac (CPU). This assumes your repo has the structure we discussed.
+
+---
+
+## 0) One-time setup
+
+### 0.1 Activate your venv
+
+```bash
+source venv/bin/activate
+```
+
+### 0.2 Install deps
+
+```bash
+pip install -r requirements.txt
+```
+
+### 0.3 Verify Ultralytics works
+
+```bash
+python -c "from ultralytics import YOLO; print('ultralytics ok')"
+```
+
+---
+
+## 1) Create dataset folders
+
+From repo root:
+
+```bash
+mkdir -p datasets/inventory_v1/{raw_images,images/all,labels/all,images/train,images/val,images/test,labels/train,labels/val,labels/test}
+```
+
+---
+
+## 2) Collect images
+
+### 2.1 Run your collector
+
+```bash
+python training/collect_images.py
+```
+
+### 2.2 How to collect (important)
+
+While the window is open:
+
+* Press **`s`** to start saving
+* Move spools around naturally:
+
+  * 1–4 spools visible
+  * spools in both zones
+  * partially blocked by hands
+  * different distances/angles
+* Press **`s`** to stop saving
+* Press **`q`** to quit
+
+Target: **300–800 images** for first model.
+
+### 2.3 Copy raw images to labeling folder
+
+```bash
+cp datasets/inventory_v1/raw_images/* datasets/inventory_v1/images/all/
+```
+
+---
+
+## 3) Label images (local, YOLO format)
+
+### 3.1 Install & start LabelImg
+
+```bash
+pip install labelImg
+python -m labelImg
+```
+
+### 3.2 Configure LabelImg
+
+Inside LabelImg:
+
+1. Click **Open Dir** → `datasets/inventory_v1/images/all`
+2. Click **Change Save Dir** → `datasets/inventory_v1/labels/all`
+3. Click **YOLO** format (left sidebar)
+4. Create/select label: **`filament_spool`**
+5. Draw a box around each spool in every image
+6. Press **Save** (or “Next” if auto-save is enabled)
+
+✅ After labeling, for each image:
+
+* `images/all/img_123.jpg`
+* `labels/all/img_123.txt` exists
+
+---
+
+## 4) Split dataset into train/val/test
+
+Run:
+
+```bash
+python training/split_dataset.py
+```
+
+You should see something like:
+
+```
+train: 600
+val: 120
+test: 80
+```
+
+---
+
+## 5) Validate labels (catch mistakes early)
+
+Run:
+
+```bash
+python training/validate_yolo_labels.py
+```
+
+If it prints any `[BAD ...]` issues, fix them before training.
+
+---
+
+## 6) Check your dataset config (data.yaml)
+
+Open `datasets/inventory_v1/data.yaml` and ensure it is exactly:
+
+```yaml
+path: datasets/inventory_v1
+train: images/train
+val: images/val
+test: images/test
+
+names:
+  0: filament_spool
+```
+
+---
+
+## 7) Train YOLOv8 (your model)
+
+### 7.1 Choose the starting model
+
+* Fastest on CPU: `yolov8n.pt`
+* Better accuracy (still okay CPU): `yolov8s.pt`
+
+### 7.2 Run training
+
+Example (recommended for first serious run):
+
+```bash
+python training/train_yolo.py
+```
+
+If your `training/train_yolo.py` uses `yolov8s.pt`, epochs ~80, device=cpu, it will create:
+
+```
+runs/inventory/spool_detector_v1/
+  weights/best.pt
+  weights/last.pt
+  results.csv
+  ...
+```
+
+### 7.3 What “best.pt” means
+
+During training YOLO evaluates on **val** every epoch and picks the model with the best validation score → saved as **`best.pt`**.
+
+---
+
+## 8) Evaluate properly (val vs test)
+
+### 8.1 Evaluate on validation set (quick check)
+
+```bash
+python training/eval_yolo.py
+```
+
+Make sure `eval_yolo.py` uses:
+
+* weights = `runs/inventory/spool_detector_v1/weights/best.pt`
+* `split="val"` (or omit split if default is val)
+
+### 8.2 Final evaluation on the test set (real score)
+
+Edit `training/eval_yolo.py` to use:
+
+```python
+split="test"
+```
+
+Then run:
+
+```bash
+python training/eval_yolo.py
+```
+
+**This is the score you report**, because test was never used during training.
+
+---
+
+## 9) Live test on your MacBook camera
+
+Run:
+
+```bash
+python training/infer_live.py
+```
+
+Expected:
+
+* It draws boxes around spools with confidence
+* It should detect all spools visible in the view consistently
+
+If it misses spools:
+
+* Collect more images of those failure cases
+* Add to dataset
+* Retrain (next step)
+
+---
+
+## 10) Real-world test inside your CV pipeline (zones + tracking)
+
+Update `config/cv.yaml` to use your trained weights:
+
+```yaml
+yolo:
+  model: "runs/inventory/spool_detector_v1/weights/best.pt"
+  conf: 0.25
+  iou: 0.45
+  device: "cpu"
+```
+
+Then run:
+
+```bash
+python -m cv.main
+```
+
+Now your pipeline is using the trained spool detector instead of COCO.
+
+---
+
+## 11) Debug & improve (the correct iteration loop)
+
+### 11.1 Save failure frames
+
+When you see:
+
+* missed spool
+* false spool detection
+
+Save those frames (screenshot or add a “press k to save frame” feature).
+
+Put them into:
+
+* `datasets/inventory_v1/images/all/`
+  Then label them and run split/train again.
+
+### 11.2 Hard example mining (best way to improve fast)
+
+Each round, add **50–150 “hard” images** and retrain for **20–40 epochs**.
+
+---
+
+## 12) Common pitfalls checklist
+
+✅ **Labels not created**: check `labels/all` has `.txt` for each image
+✅ **Wrong class index**: class must be `0` only
+✅ **Bad normalization**: YOLO label values must be in 0–1
+✅ **Mismatch in train/val/test**: make sure split script copied pairs correctly
+✅ **Low light / glare**: add images from those exact conditions
+✅ **Overfitting**: great train, bad val/test → add more varied images and reduce epochs
+
+---
+
+## 13) What to submit / store after training
+
+Keep these:
+
+* `datasets/inventory_v1/data.yaml`
+* your dataset folders
+* `runs/inventory/spool_detector_v1/weights/best.pt`
+* evaluation results (val + test)
+
+---

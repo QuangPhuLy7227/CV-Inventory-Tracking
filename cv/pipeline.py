@@ -3,10 +3,11 @@ import yaml
 
 from cv.detectors.yolo_detector import YOLODetector
 from cv.tracking.zone_mapper import assign_to_zones, count_by_zone
-from cv.tracking.state_tracker import ZoneStateTracker, infer_transfers
+from cv.tracking.state_tracker import ZoneStateTracker
 from cv.utils.draw import draw_rect_zone, draw_bbox
 from cv.tracking.simple_tracker import SimpleTracker
 from cv.qr.qr_reader import QRReader
+from cv.color.color_detector import FilamentColorDetector
 
 
 def load_yaml(path):
@@ -36,7 +37,7 @@ class CVPipeline:
         self.class_filter = set(cfg.get("detect_classes") or [])
         self.process_every_n = int(cfg["logic"]["process_every_n_frames"])
         self.publish_events = bool(cfg["logic"]["publish_events"])
-        self.object_type = "generic_object"  # Phase 2 testing. Later: filament_spool / printer.
+        self.object_type = "filament_spool"
 
         self.tracker = SimpleTracker(
             max_age_frames=60,
@@ -59,6 +60,10 @@ class CVPipeline:
 
         # cache last known QR per track so you don't need to decode every frame
         self.track_qr_cache = {}  # track_id -> {"raw": str, "payload": dict}
+
+        self.color_detector = FilamentColorDetector()
+        self.track_color_cache = {}  # track_id -> {"color": str, "conf": float}
+        self.color_every_n = 3       # compute color every N processed frames
 
         # Publisher is optional, and imported only if needed
         self.publisher = None
@@ -112,8 +117,21 @@ class CVPipeline:
 
         # 3) Tracking-based transfers (best for MOVE events)
         tracks_out, transfers, enters, exits = self.tracker.update(dets)
-        print("[DEBUG tracks]", [(t["track_id"], t["label"], t.get("prev_zone_id"), t.get("zone_id")) for t in tracks_out])
-        print("[DEBUG events]", "T=", len(transfers), "E=", len(enters), "X=", len(exits))
+        # print("[DEBUG tracks]", [(t["track_id"], t["label"], t.get("prev_zone_id"), t.get("zone_id")) for t in tracks_out])
+        # print("[DEBUG events]", "T=", len(transfers), "E=", len(enters), "X=", len(exits))
+        # --- Color estimation (cached) ---
+        if (self.frame_i % self.color_every_n) == 0:
+            for t in tracks_out:
+                tid = t["track_id"]
+                x1, y1, x2, y2 = t["bbox"]
+                crop = frame_bgr[y1:y2, x1:x2]
+
+                color, cconf = self.color_detector.classify(crop)
+
+                prev = self.track_color_cache.get(tid)
+                # overwrite if better confidence, or if no previous
+                if (prev is None) or (cconf >= (prev.get("conf", 0.0) + 0.05)):
+                    self.track_color_cache[tid] = {"color": color, "conf": cconf}
 
         # --- QR decode step (ROI-based, fast) ---
         if self.qr_enabled and self.qr_reader is not None and (self.frame_i % self.qr_every_n == 0):
@@ -145,6 +163,10 @@ class CVPipeline:
                     label = f"#{tid} {t['label']} QR:{qid}"
                 else:
                     label = f"#{tid} {t['label']} QR"
+
+            col = self.track_color_cache.get(tid, {}).get("color")
+            if col and col != "unknown":
+                label = f"{label} [{col}]"
 
             draw_bbox(annotated, t["bbox"], label, t["conf"])
 
@@ -198,19 +220,23 @@ class CVPipeline:
             for e in enters:
                 try:
                     hinted_id, qr_meta = self._qr_meta_for_track(e["track_id"])
+                    col = self.track_color_cache.get(e["track_id"], {}).get("color", "unknown")
+                    ccf = self.track_color_cache.get(e["track_id"], {}).get("conf", 0.0)
                     meta = {
                         "source": "phase2",
                         "mode": "enter",
                         "label": e["label"],
                         "track_id": e["track_id"],
                         "reason": e.get("reason"),
+                        "filament_color": col,
+                        "filament_color_conf": ccf,
                         **qr_meta,
                     }
                     resp = self.publisher.publish_zone_change(
                         object_type=self.object_type,
                         from_zone=None,
                         to_zone=e["to_zone"],
-                        hinted_object_id=None,
+                        hinted_object_id=hinted_id,
                         confidence=0.6,
                         meta=meta,
                     )
@@ -220,20 +246,24 @@ class CVPipeline:
 
             for x in exits:
                 try:
-                    hinted_id, qr_meta = self._qr_meta_for_track(e["track_id"])
+                    hinted_id, qr_meta = self._qr_meta_for_track(x["track_id"])
+                    col = self.track_color_cache.get(x["track_id"], {}).get("color", "unknown")
+                    ccf = self.track_color_cache.get(x["track_id"], {}).get("conf", 0.0)
                     meta = {
                         "source": "phase2",
-                        "mode": "enter",
-                        "label": e["label"],
-                        "track_id": e["track_id"],
-                        "reason": e.get("reason"),
+                        "mode": "exit",
+                        "label": x["label"],
+                        "track_id": x["track_id"],
+                        "reason": x.get("reason"),
+                        "filament_color": col,
+                        "filament_color_conf": ccf,
                         **qr_meta,
                     }
                     resp = self.publisher.publish_zone_change(
                         object_type=self.object_type,
                         from_zone=x["from_zone"],
                         to_zone=None,
-                        hinted_object_id=None,
+                        hinted_object_id=hinted_id,
                         confidence=0.6,
                         meta=meta,
                     )
@@ -243,20 +273,24 @@ class CVPipeline:
 
             for t in transfers:
                 try:
-                    hinted_id, qr_meta = self._qr_meta_for_track(e["track_id"])
+                    hinted_id, qr_meta = self._qr_meta_for_track(t["track_id"])
+                    col = self.track_color_cache.get(t["track_id"], {}).get("color", "unknown")
+                    ccf = self.track_color_cache.get(t["track_id"], {}).get("conf", 0.0)
                     meta = {
                         "source": "phase2",
-                        "mode": "enter",
-                        "label": e["label"],
-                        "track_id": e["track_id"],
-                        "reason": e.get("reason"),
+                        "mode": "transfer",
+                        "label": t["label"],
+                        "track_id": t["track_id"],
+                        "reason": t.get("reason"),
+                        "filament_color": col,
+                        "filament_color_conf": ccf,
                         **qr_meta,
                     }
                     resp = self.publisher.publish_zone_change(
                         object_type=self.object_type,
                         from_zone=t["from_zone"],
                         to_zone=t["to_zone"],
-                        hinted_object_id=None,
+                        hinted_object_id=hinted_id,
                         confidence=0.7,
                         meta=meta,
                     )
@@ -286,24 +320,29 @@ class CVPipeline:
                     debug["published"].append({"error": str(ex), "event": r})
 
         else:
-            # Standalone mode: print the events
+            for e in enters:
+                col = self.track_color_cache.get(e["track_id"], {}).get("color", "unknown")
+                hinted_id, _ = self._qr_meta_for_track(e["track_id"])
+                qr_txt = f" QR:{hinted_id}" if hinted_id else ""
+                print(f"[CV] ENTER   #{e['track_id']} {col} {e['label']}{qr_txt} -> {e['to_zone']} ({e.get('reason')})")
+
+            for x in exits:
+                col = self.track_color_cache.get(x["track_id"], {}).get("color", "unknown")
+                hinted_id, _ = self._qr_meta_for_track(x["track_id"])
+                qr_txt = f" QR:{hinted_id}" if hinted_id else ""
+                print(f"[CV] EXIT    #{x['track_id']} {col} {x['label']}{qr_txt} {x['from_zone']} -> OUTSIDE ({x.get('reason')})")
+
             for t in transfers:
-                for e in enters:
-                    print(f"[CV] ENTER  #{e['track_id']} {e['label']} -> {e['to_zone']} ({e.get('reason')})")
-                for x in exits:
-                    print(f"[CV] EXIT   #{x['track_id']} {x['label']} {x['from_zone']} -> OUTSIDE ({x.get('reason')})")
-                for t in transfers:
-                    print(f"[CV] TRANSFER #{t['track_id']} {t['label']} {t['from_zone']} -> {t['to_zone']} ({t.get('reason')})")
-                
+                col = self.track_color_cache.get(t["track_id"], {}).get("color", "unknown")
                 hinted_id, _ = self._qr_meta_for_track(t["track_id"])
                 qr_txt = f" QR:{hinted_id}" if hinted_id else ""
-                print(f"[CV] TRANSFER #{t['track_id']} {t['label']}{qr_txt} {t['from_zone']} -> {t['to_zone']} ({t.get('reason')})")
-            
+                print(f"[CV] TRANSFER #{t['track_id']} {col} {t['label']}{qr_txt} {t['from_zone']} -> {t['to_zone']} ({t.get('reason')})")
+
             for r in residual:
                 if r["mode"] == "appearance":
-                    print(f"[CV] APPEAR {r['to_zone']} ({r['old']} -> {r['new']})")
+                    print(f"[CV] APPEAR     {r['to_zone']} ({r['old']} -> {r['new']})")
                 else:
-                    print(f"[CV] DISAPPEAR {r['from_zone']} ({r['old']} -> {r['new']})")
+                    print(f"[CV] DISAPPEAR  {r['from_zone']} ({r['old']} -> {r['new']})")
 
         return annotated, debug
     
