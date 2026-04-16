@@ -2,7 +2,6 @@
 __pycache__/
 *.py[codz]
 *$py.class
-./datasets
 
 # C extensions
 *.so
@@ -215,3 +214,15 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+
+# datasets / training artifacts
+datasets/
+**/raw_images/
+**/images/
+**/labels/
+runs/
+*.pt
+*.onnx
+*.torchscript
+*.engine
