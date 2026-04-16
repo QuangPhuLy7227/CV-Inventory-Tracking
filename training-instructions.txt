@@ -39,7 +39,7 @@ mkdir -p datasets/inventory_v1/{raw_images,images/all,labels/all,images/train,im
 ### 2.1 Run your collector
 
 ```bash
-python training/collect_images.py
+python training\collect_images.py
 ```
 
 ### 2.2 How to collect (important)

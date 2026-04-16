@@ -1,4 +1,4 @@
-path: datasets/inventory_v1
+path: C:/Users/gentr_hc1i7iq/IdeaProjects/Projects/CV-Inventory-Tracking/datasets/inventory_v1
 train: images/train
 val: images/val
 test: images/test

@@ -4,7 +4,7 @@ import cv2
 
 def main(
     out_dir="datasets/inventory_v1/raw_images",
-    cam_index=0,
+    cam_index=2,
     every_n_frames=5,
     max_images=500
 ):
