@@ -34,6 +34,8 @@ class CVPipeline:
             device=str(cfg["yolo"]["device"]),
         )
 
+        print("[CV] YOLO model:", cfg["yolo"]["model"])
+
         self.class_filter = set(cfg.get("detect_classes") or [])
         self.process_every_n = int(cfg["logic"]["process_every_n_frames"])
         self.publish_events = bool(cfg["logic"]["publish_events"])

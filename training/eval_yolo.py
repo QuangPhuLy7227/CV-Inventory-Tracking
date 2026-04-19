@@ -2,7 +2,7 @@ from ultralytics import YOLO
 
 def main(
     weights="runs/inventory/spool_detector_v12/weights/best.pt",
-    data_yaml="datasets/inventory_v1/data.yaml",
+    data_yaml="datasets/inventory_v1/data.local.yaml",
     imgsz=640,
     device="cpu",
     split="test",   # "val" for quick check, "test" for final reported score
