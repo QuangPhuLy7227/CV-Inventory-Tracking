@@ -77,14 +77,6 @@ python -m labelImg
 
 ### 3.2 Configure LabelImg
 
-Inside LabelImg:
-
-1. Click **Open Dir** → `datasets/inventory_v1/images/all`
-2. Click **Change Save Dir** → `datasets/inventory_v1/labels/all`
-3. Click **YOLO** format (left sidebar)
-4. Create/select label: **`filament_spool`**
-5. Draw a box around each spool in every image
-6. Press **Save** (or “Next” if auto-save is enabled)
 
 ✅ After labeling, for each image:
 

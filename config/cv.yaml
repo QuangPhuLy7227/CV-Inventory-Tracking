@@ -5,7 +5,7 @@ camera:
   fps: 30
 
 yolo:
-  model: "runs/inventory/spool_detector_v12/weights/best.pt"
+  model: "runs/inventory/spool_detector_v14/weights/best.pt"
   conf: 0.25
   iou: 0.45
   device: "cpu"         # "cpu" or "0" for GPU
