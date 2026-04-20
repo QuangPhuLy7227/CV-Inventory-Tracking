@@ -1,4 +1,5 @@
 camera:
+  camera_id: "cam_1"
   index: 0              # MacBook camera (0)
   width: 1280
   height: 720
@@ -6,7 +7,7 @@ camera:
 
 yolo:
   model: "runs/inventory/spool_detector_v12/weights/best.pt"
-  conf: 0.25
+  conf: 0.20
   iou: 0.45
   device: "cpu"         # "cpu" or "0" for GPU
 
@@ -36,7 +37,26 @@ qr:
 #   save_video: false
 #   save_debug_frames: false
 
-backend:
-  base_url: "http://localhost:8000"
-  cv_event_path: "/api/events/cv"
-  timeout_seconds: 2
+# backend:
+#   base_url: "http://localhost:8000"
+#   cv_event_path: "/api/events/cv"
+#   timeout_seconds: 2
+
+rabbitmq:
+  enabled: true
+  host: "206.180.209.81"
+  port: 5672
+  username: "twin"
+  password: "twinrabbitpass"
+  vhost: "/"
+  exchange: "cv.events"
+
+anomaly:
+  enabled: true
+  model: "yolov8n.pt" # COCO
+  conf: 0.25
+  iou: 0.45
+  device: "cpu"
+  every_n_frames: 10 # run less frequently
+  ignore_labels:
+    - "person" # ignore humans

@@ -50,3 +50,13 @@ move it to Zone_Right → CV infers transfer → posts /api/events/cv
 check pending confirmations:
 
 curl http://localhost:8000/api/confirmations/pending
+
+
+
+
+RabbitMQ
+python training/rmq_subscribe_debug.py --pretty
+python training/rmq_subscribe_debug.py --binding cv.zone.inventory --pretty
+
+python training/rmq_purge_queue.py --queue backend.cv.events
+python training/rmq_purge_queue.py --queue backend.cv.events --delete

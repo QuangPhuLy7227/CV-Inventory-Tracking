@@ -7,3 +7,4 @@ torch>=2.2.0
 scikit-learn
 qrcode[pil]
 labelImg
+pika==1.3.2
