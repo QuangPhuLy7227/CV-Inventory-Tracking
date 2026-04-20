@@ -8,10 +8,10 @@ def main():
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
 
-    weights = "runs/inventory/spool_detector_v12/weights/best.pt"
+    weights = "runs/inventory/spool_detector_v13/weights/best.pt"
     model = YOLO(weights)
 
-    cap = cv2.VideoCapture(0)
+    cap = cv2.VideoCapture(1)
     if not cap.isOpened():
         raise RuntimeError("Cannot open camera")
     
