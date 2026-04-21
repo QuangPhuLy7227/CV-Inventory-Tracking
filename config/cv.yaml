@@ -22,6 +22,7 @@ detect_classes:
 logic:
   process_every_n_frames: 2
   min_stable_frames: 5          # debounce: require stable change
+  min_unknown_frames: 6
   # publish_events: true
   publish_events: false
 

@@ -44,6 +44,9 @@ class CVPipeline:
         # self.publish_events = bool(cfg["logic"]["publish_events"])
         self.object_type = "filament_spool"
 
+        self.min_unknown_frames = int(cfg["logic"].get("min_unknown_frames", 6))
+        self._unknown_age = {}  # track_id -> {"zone_id": str, "age": int}
+
         self.tracker = SimpleTracker(
             max_age_frames=60,
             match_dist_px=250.0,
@@ -62,6 +65,9 @@ class CVPipeline:
         self.qr_pad = int(self.qr_cfg.get("roi_pad_px", 14))
         self.qr_draw = bool(self.qr_cfg.get("draw_overlay", True))
         self.qr_reader = QRReader() if self.qr_enabled else None
+        self.qr_full_frame = True           # use full-frame decoding
+        self.qr_assign_max_px = 220         # tune for your camera distance
+        self.qr_full_every_n = 2            # decode full frame every N processed frames
 
         # cache last known QR per track so you don't need to decode every frame
         self.track_qr_cache = {}  # track_id -> {"raw": str, "payload": dict}
@@ -174,13 +180,44 @@ class CVPipeline:
         #         if (prev is None) or (cconf >= (prev.get("conf", 0.0) + 0.05)):
         #             self.track_color_cache[tid] = {"color": color, "conf": cconf}
 
-        # --- QR decode step (ROI-based, fast) ---
-        if self.qr_enabled and self.qr_reader is not None and (self.frame_i % self.qr_every_n == 0):
+        # --- QR decode (full-frame) and assign to nearest spool track ---
+        if self.qr_enabled and self.qr_reader is not None and (self.frame_i % self.qr_full_every_n == 0):
+            qr_list = self.qr_reader.decode_multi_bgr(frame_bgr)
+
+            # precompute track centers
+            track_centers = []
             for t in tracks_out:
-                tid = t["track_id"]
-                raw, payload = self.qr_reader.decode_roi(frame_bgr, t["bbox"], pad=self.qr_pad)
-                if raw:
-                    self.track_qr_cache[tid] = {"raw": raw, "payload": payload}
+                x1, y1, x2, y2 = t["bbox"]
+                cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+                track_centers.append((t["track_id"], cx, cy))
+
+            for qr in qr_list:
+                payload = qr.get("payload")
+                if not isinstance(payload, dict):
+                    continue
+                spool_id = payload.get("id")
+                if not spool_id:
+                    continue
+
+                # if multi decode gave center, match by nearest distance
+                if qr.get("center") and track_centers:
+                    qx, qy = qr["center"]
+                    best_tid = None
+                    best_d2 = None
+                    for tid, cx, cy in track_centers:
+                        dx, dy = (cx - qx), (cy - qy)
+                        d2 = dx*dx + dy*dy
+                        if best_d2 is None or d2 < best_d2:
+                            best_d2 = d2
+                            best_tid = tid
+
+                    if best_tid is not None and best_d2 is not None:
+                        if best_d2 <= (self.qr_assign_max_px * self.qr_assign_max_px):
+                            self.track_qr_cache[best_tid] = {"raw": qr["raw"], "payload": payload}
+                else:
+                    # fallback: no center info; can't match robustly
+                    # (ignore or set global cache)
+                    pass
 
         debug["transfers"] = transfers
         debug["enters"] = enters
@@ -444,21 +481,43 @@ class CVPipeline:
         return hinted_id  # QR id == spool_id (recommended)
 
     def _build_zone_inventory_payload(self, tracks_out):
-        # zone -> {spool_ids: [], unknown_spool_count: int}
         zones = {z["zone_id"]: {"spool_ids": [], "unknown_spool_count": 0} for z in self.zones}
 
+        seen_track_ids = set()
+
         for t in tracks_out:
+            tid = t["track_id"]
             zid = t.get("zone_id")
             if zid not in zones:
                 continue
 
-            spool_id = self._get_spool_id_for_track(t["track_id"])
-            if spool_id:
-                zones[zid]["spool_ids"].append(spool_id)
-            else:
-                zones[zid]["unknown_spool_count"] += 1
+            seen_track_ids.add(tid)
 
-        # sort spool_ids for stable comparison
+            spool_id = self._get_spool_id_for_track(tid)
+
+            if spool_id:
+                # QR-confirmed: count immediately + clear unknown age
+                zones[zid]["spool_ids"].append(spool_id)
+                if tid in self._unknown_age:
+                    del self._unknown_age[tid]
+            else:
+                # Unknown spool: require it to persist for min_unknown_frames
+                prev = self._unknown_age.get(tid)
+
+                if prev is None or prev["zone_id"] != zid:
+                    self._unknown_age[tid] = {"zone_id": zid, "age": 1}
+                else:
+                    prev["age"] += 1
+
+                if self._unknown_age[tid]["age"] >= self.min_unknown_frames:
+                    zones[zid]["unknown_spool_count"] += 1
+
+        # Cleanup stale tracks (not seen anymore)
+        stale = [tid for tid in self._unknown_age.keys() if tid not in seen_track_ids]
+        for tid in stale:
+            del self._unknown_age[tid]
+
+        # stabilize spool_ids for comparison
         for zid in zones:
             zones[zid]["spool_ids"] = sorted(list(set(zones[zid]["spool_ids"])))
 
