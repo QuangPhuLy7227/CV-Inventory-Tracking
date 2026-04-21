@@ -1,7 +1,7 @@
 import cv2
 from cv.qr.qr_reader import QRReader
 
-def main(cam_index=0):
+def main(cam_index=2):
     qr = QRReader()
     cap = cv2.VideoCapture(cam_index)
     if not cap.isOpened():

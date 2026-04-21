@@ -22,7 +22,7 @@ class FilamentSpool(BaseModel):
     zone_id: Optional[str] = Field(default=None, description="Current location zone_id")
     mounted_printer_id: Optional[str] = None
 
-    updated_at: datetime = Field(default_factory=datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class Printer(BaseModel):
     printer_id: str = Field(..., examples=["P3"])
@@ -31,4 +31,4 @@ class Printer(BaseModel):
     zone_id: Optional[str] = Field(default=None, description="Where the printer is located (if tracked by zone)")
     mounted_spool_id: Optional[str] = None
 
-    updated_at: datetime = Field(default_factory=datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

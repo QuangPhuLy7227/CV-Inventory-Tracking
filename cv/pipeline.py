@@ -403,22 +403,19 @@ class CVPipeline:
         # -------------------------------
         if enters or exits or transfers or residual:
             for e in enters:
-                # col = self.track_color_cache.get(e["track_id"], {}).get("color", "unknown")
                 hinted_id, _ = self._qr_meta_for_track(e["track_id"])
                 qr_txt = f" QR:{hinted_id}" if hinted_id else ""
-                print(f"[CV] ENTER    #{e['track_id']} {col} {e['label']}{qr_txt} -> {e['to_zone']} ({e.get('reason')})")
+                print(f"[CV] ENTER    #{e['track_id']} {e['label']}{qr_txt} -> {e['to_zone']} ({e.get('reason')})")
 
             for x in exits:
-                # col = self.track_color_cache.get(x["track_id"], {}).get("color", "unknown")
                 hinted_id, _ = self._qr_meta_for_track(x["track_id"])
                 qr_txt = f" QR:{hinted_id}" if hinted_id else ""
-                print(f"[CV] EXIT     #{x['track_id']} {col} {x['label']}{qr_txt} {x['from_zone']} -> OUTSIDE ({x.get('reason')})")
+                print(f"[CV] EXIT     #{x['track_id']} {x['label']}{qr_txt} {x['from_zone']} -> OUTSIDE ({x.get('reason')})")
 
             for t in transfers:
-                # col = self.track_color_cache.get(t["track_id"], {}).get("color", "unknown")
                 hinted_id, _ = self._qr_meta_for_track(t["track_id"])
                 qr_txt = f" QR:{hinted_id}" if hinted_id else ""
-                print(f"[CV] TRANSFER #{t['track_id']} {col} {t['label']}{qr_txt} {t['from_zone']} -> {t['to_zone']} ({t.get('reason')})")
+                print(f"[CV] TRANSFER #{t['track_id']} {t['label']}{qr_txt} {t['from_zone']} -> {t['to_zone']} ({t.get('reason')})")
 
             for r in residual:
                 if r["mode"] == "appearance":

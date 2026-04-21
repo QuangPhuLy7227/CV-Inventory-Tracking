@@ -1,3 +1,7 @@
+import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import cv2
 from cv.pipeline import CVPipeline
 from cv.utils.fps import FPS
@@ -11,7 +15,7 @@ def main():
     cfg = load_yaml("config/cv.yaml")
     cam_cfg = cfg["camera"]
 
-    cap = cv2.VideoCapture(int(cam_cfg["index"]))
+    cap = cv2.VideoCapture(2)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, int(cam_cfg["width"]))
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(cam_cfg["height"]))
     cap.set(cv2.CAP_PROP_FPS, int(cam_cfg["fps"]))

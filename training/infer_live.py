@@ -1,8 +1,11 @@
 import os
+import sys
 import json
 import cv2
 from datetime import datetime
 from ultralytics import YOLO
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from cv.tracking.zone_mapper import assign_to_zones
 from cv.tracking.simple_tracker import SimpleTracker
@@ -23,7 +26,7 @@ def main():
     save_dir = "captured_errors"
     os.makedirs(save_dir, exist_ok=True)
 
-    weights = "runs/inventory/spool_detector_v13/weights/best.pt"
+    weights = "runs/inventory/spool_detector_v15/weights/best.pt"
     model = YOLO(weights)
 
     zones = load_zones("config/zones.json")
@@ -34,7 +37,7 @@ def main():
     # track_age: track_id -> {"zone_id": zid, "age": int}
     track_age = {}
 
-    cap = cv2.VideoCapture(1)
+    cap = cv2.VideoCapture(2)
     if not cap.isOpened():
         raise RuntimeError("Cannot open camera")
 
@@ -57,7 +60,7 @@ def main():
         for z in zones:
             draw_rect_zone(frame, z)
 
-        results = model.predict(raw_frame, conf=0.25, verbose=False)
+        results = model.predict(frame, conf=0.4, verbose=False)
         r = results[0]
 
         dets = []
