@@ -223,6 +223,7 @@ datasets/
 **/labels/
 runs/
 *.pt
+!weights/**/*.pt
 *.onnx
 *.torchscript
 *.engine
