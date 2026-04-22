@@ -49,7 +49,7 @@ class CVPipeline:
 
         self.tracker = SimpleTracker(
             max_age_frames=60,
-            match_dist_px=250.0,
+            match_dist_px=400.0,
             max_zone_gap_frames=20,
             enforce_same_label=False
         )
@@ -66,11 +66,13 @@ class CVPipeline:
         self.qr_draw = bool(self.qr_cfg.get("draw_overlay", True))
         self.qr_reader = QRReader() if self.qr_enabled else None
         self.qr_full_frame = True           # use full-frame decoding
-        self.qr_assign_max_px = 220         # tune for your camera distance
+        self.qr_assign_max_px = int(self.qr_cfg.get("assign_max_px", 400))
         self.qr_full_every_n = 2            # decode full frame every N processed frames
+        self.qr_persist_frames = int(self.qr_cfg.get("persist_frames", 30))
 
-        # cache last known QR per track so you don't need to decode every frame
-        self.track_qr_cache = {}  # track_id -> {"raw": str, "payload": dict}
+        # cache last known QR per track — cleared when QR leaves frame
+        self.track_qr_cache = {}       # track_id -> {"raw": str, "payload": dict}
+        self.track_qr_last_seen = {}   # track_id -> frame_i of last successful decode
 
         # self.color_detector = FilamentColorDetector()
         # self.track_color_cache = {}  # track_id -> {"color": str, "conf": float}
@@ -120,7 +122,11 @@ class CVPipeline:
         self._last_inventory_payload = None
         self._last_anomaly_payload = None
         self.publish_min_interval_sec = 0.5
-        self._last_publish_ts = 0.0
+        self._last_inventory_ts = 0.0
+        self._last_anomaly_ts = 0.0
+        self._last_anomaly_count = 0     # cached so display doesn't flicker between runs
+        self.anomaly_sticky_frames = int(anom.get("sticky_frames", 15))
+        self._anomaly_sticky_countdown = 0
 
         self.frame_i = 0
 
@@ -141,7 +147,7 @@ class CVPipeline:
         for z in self.zones:
             draw_rect_zone(annotated, z)
 
-        debug = {"published": [], "counts": None, "changes": [], "transfers": [], "enters": [], "exits": [], "residual": []}
+        debug = {"published": [], "counts": None, "changes": [], "transfers": [], "enters": [], "exits": [], "residual": [], "anomaly_count": self._last_anomaly_count}
 
         # Only run detection every N frames to reduce CPU load
         if (self.frame_i % self.process_every_n) != 0:
@@ -199,7 +205,7 @@ class CVPipeline:
                 if not spool_id:
                     continue
 
-                # if multi decode gave center, match by nearest distance
+                # match QR to nearest spool track by center distance
                 if qr.get("center") and track_centers:
                     qx, qy = qr["center"]
                     best_tid = None
@@ -214,10 +220,17 @@ class CVPipeline:
                     if best_tid is not None and best_d2 is not None:
                         if best_d2 <= (self.qr_assign_max_px * self.qr_assign_max_px):
                             self.track_qr_cache[best_tid] = {"raw": qr["raw"], "payload": payload}
-                else:
-                    # fallback: no center info; can't match robustly
-                    # (ignore or set global cache)
-                    pass
+                            self.track_qr_last_seen[best_tid] = self.frame_i
+
+        # Expire QR cache for tracks whose QR hasn't been seen for qr_persist_frames
+        if self.qr_enabled:
+            expired = [
+                tid for tid, last in self.track_qr_last_seen.items()
+                if (self.frame_i - last) > self.qr_persist_frames
+            ]
+            for tid in expired:
+                self.track_qr_cache.pop(tid, None)
+                del self.track_qr_last_seen[tid]
 
         debug["transfers"] = transfers
         debug["enters"] = enters
@@ -425,27 +438,35 @@ class CVPipeline:
 
 
         # ---------------------------------------
-        # Build payloads and print before publish
+        # Anomaly detection (always runs, independent of RMQ)
         # ---------------------------------------
-        inv_payload = None
         anom_payload = None
+        if self.anomaly_enabled and (self.frame_i % self.anomaly_every_n == 0):
+            anom_payload = self._build_zone_anomaly_payload(frame_bgr, counts)
+            count = anom_payload.get("total_other_count", 0)
+            if count > 0:
+                self._last_anomaly_count = count
+                self._anomaly_sticky_countdown = self.anomaly_sticky_frames
+            elif self._anomaly_sticky_countdown > 0:
+                self._anomaly_sticky_countdown -= 1
+            else:
+                self._last_anomaly_count = 0
 
+        # always carry the last known anomaly count so the display doesn't flicker
+        debug["anomaly_count"] = self._last_anomaly_count
+
+        # ---------------------------------------
+        # Build inventory payload and publish
+        # ---------------------------------------
         if self.rmq_enabled and self.publisher_rmq is not None:
             inv_payload = self._build_zone_inventory_payload(tracks_out)
 
-            # Print inventory payload only when it changes
             if inv_payload != self._last_inventory_payload:
                 print("[RMQ] would publish cv.zone.inventory:", inv_payload)
 
-            # anomaly payload only every N frames
-            if self.anomaly_enabled and (self.frame_i % self.anomaly_every_n == 0):
-                anom_payload = self._build_zone_anomaly_payload(frame_bgr,counts)
-                if anom_payload != self._last_anomaly_payload:
-                    print("[RMQ] would publish cv.zone.anomaly:", anom_payload)
+            if anom_payload is not None and anom_payload != self._last_anomaly_payload:
+                print("[RMQ] would publish cv.zone.anomaly:", anom_payload)
 
-            # ---------------------------------------
-            # Actually publish (still change-throttled)
-            # ---------------------------------------
             self._maybe_publish("cv.zone.inventory", inv_payload, kind="inventory")
 
             if anom_payload is not None:
@@ -527,8 +548,9 @@ class CVPipeline:
 
     def _build_zone_anomaly_payload(self, frame_bgr, spool_counts: dict):
         """
-        other_count = coco_count - spool_count (per zone)
-        spool_counts: {zone_id: int} from your tracked spool counts
+        Per zone: other_count = max(0, coco_in_zone - spools_in_zone)
+        Total: sum of all zone other_counts.
+        Uses zone-assigned spool counts (not raw track count) to avoid ghost track inflation.
         """
         zones = {z["zone_id"]: {"other_count": 0} for z in self.zones}
 
@@ -537,40 +559,40 @@ class CVPipeline:
                 "type": "zone.anomaly",
                 "ts": self._now_iso(),
                 "camera_id": self.camera_id,
-                "zones": zones
+                "zones": zones,
+                "total_other_count": 0,
             }
 
         dets = self.anomaly_detector.detect(frame_bgr)
         dets = [d for d in dets if d.get("label") not in self.anomaly_ignore]
-        dets = [d for d in dets if d.get("conf", 0.0) >= 0.25]
+        dets = [d for d in dets if d.get("conf", 0.0) >= 0.15]
         dets = assign_to_zones(dets, self.zones)
 
-        # count COCO objects per zone
-        coco_counts = {z["zone_id"]: 0 for z in self.zones}
+        zone_coco = {z["zone_id"]: 0 for z in self.zones}
         for d in dets:
             zid = d.get("zone_id")
-            if zid in coco_counts:
-                coco_counts[zid] += 1
+            if zid in zone_coco:
+                zone_coco[zid] += 1
 
-        # compute other_count = max(0, coco - spool)
         for zid in zones:
+            coco_c = zone_coco.get(zid, 0)
             spool_c = int(spool_counts.get(zid, 0))
-            coco_c = int(coco_counts.get(zid, 0))
             zones[zid]["other_count"] = max(0, coco_c - spool_c)
 
-        print("[ANOM] coco_counts:", coco_counts, "spool_counts:", spool_counts, "other:", zones)
+        total_other = sum(z["other_count"] for z in zones.values())
 
         return {
             "type": "zone.anomaly",
             "ts": self._now_iso(),
             "camera_id": self.camera_id,
-            "zones": zones
+            "zones": zones,
+            "total_other_count": total_other,
         }
 
     def _maybe_publish(self, routing_key: str, payload: dict, kind: str):
-        # publish only when changed, and at least every publish_min_interval_sec
         now = time.time()
-        if (now - self._last_publish_ts) < self.publish_min_interval_sec:
+        last_ts = self._last_inventory_ts if kind == "inventory" else self._last_anomaly_ts
+        if (now - last_ts) < self.publish_min_interval_sec:
             return
 
         last = self._last_inventory_payload if kind == "inventory" else self._last_anomaly_payload
@@ -582,7 +604,7 @@ class CVPipeline:
 
         if kind == "inventory":
             self._last_inventory_payload = payload
+            self._last_inventory_ts = now
         else:
             self._last_anomaly_payload = payload
-
-        self._last_publish_ts = now
+            self._last_anomaly_ts = now

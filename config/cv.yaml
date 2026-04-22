@@ -31,6 +31,8 @@ qr:
   decode_every_n_frames: 2
   roi_pad_px: 14
   draw_overlay: true
+  assign_max_px: 400   # max px from QR center to spool bbox center for a match
+  persist_frames: 30   # frames to keep QR label after QR leaves frame (~1s at 30fps)
 
 # runtime:
 #   show_window: true
@@ -58,6 +60,7 @@ anomaly:
   conf: 0.25
   iou: 0.45
   device: "cpu"
-  every_n_frames: 10 # run less frequently
+  every_n_frames: 10  # run less frequently
+  sticky_frames: 3    # keep anomaly count for N extra detection cycles after COCO misses (~1s)
   ignore_labels:
     - "person" # ignore humans

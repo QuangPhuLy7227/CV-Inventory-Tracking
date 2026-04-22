@@ -1,51 +1,66 @@
 import cv2
 from cv.qr.qr_reader import QRReader
 
-def main(cam_index=2):
+PERSIST_FRAMES = 20  # keep drawing a QR box for this many frames after last detection
+
+def main(cam_index=1):
     qr = QRReader()
     cap = cv2.VideoCapture(cam_index)
     if not cap.isOpened():
         raise RuntimeError("Cannot open camera.")
 
+    cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)
+    cap.set(cv2.CAP_PROP_FOCUS, 30)
+
     print("Show QR codes to camera. Press 'q' to quit.")
-    last_seen = set()  # to avoid spamming prints
+
+    # cache: raw_string -> {"bbox": [...], "label": str, "last_frame": int}
+    qr_cache = {}
+    frame_i = 0
+    last_printed = set()
 
     while True:
         ok, frame = cap.read()
         if not ok:
             break
+        frame_i += 1
 
-        qr_list = qr.decode_multi_bgr(frame)  # ✅ multiple QR decode
+        qr_list = qr.decode_multi_bgr(frame)
 
-        # draw + print
-        current_seen = set()
+        # update cache with fresh detections
         for item in qr_list:
             raw = item.get("raw")
+            if not raw:
+                continue
             payload = item.get("payload")
             bbox = item.get("bbox")
+            label = "QR"
+            if isinstance(payload, dict) and payload.get("id"):
+                label = f"QR:{payload['id']}"
 
-            if raw:
-                current_seen.add(raw)
+            if raw not in last_printed:
+                print("\n[QR] raw:", raw)
+                if payload:
+                    print("[QR] parsed:", payload)
+                last_printed.add(raw)
 
-                # print only when newly seen
-                if raw not in last_seen:
-                    print("\n[QR] raw:", raw)
-                    if payload:
-                        print("[QR] parsed:", payload)
-
-            # draw bbox if available
             if bbox:
-                x1, y1, x2, y2 = bbox
-                cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 255, 255), 2)
+                qr_cache[raw] = {"bbox": bbox, "label": label, "last_frame": frame_i}
 
-                # label: show id if payload dict has it
-                label = "QR"
-                if isinstance(payload, dict) and payload.get("id"):
-                    label = f"QR:{payload['id']}"
-                cv2.putText(frame, label, (x1, max(0, y1 - 8)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        # draw all cached QRs that are still within PERSIST_FRAMES
+        stale = []
+        for raw, entry in qr_cache.items():
+            if (frame_i - entry["last_frame"]) > PERSIST_FRAMES:
+                stale.append(raw)
+                continue
+            x1, y1, x2, y2 = entry["bbox"]
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            cv2.putText(frame, entry["label"], (x1, max(0, y1 - 8)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
-        last_seen = current_seen
+        for raw in stale:
+            del qr_cache[raw]
+            last_printed.discard(raw)
 
         cv2.imshow("QR Test (Multi)", frame)
         if (cv2.waitKey(1) & 0xFF) == ord("q"):
