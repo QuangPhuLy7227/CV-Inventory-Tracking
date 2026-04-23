@@ -4,6 +4,7 @@ camera:
   width: 1280
   height: 720
   fps: 30
+  focus: 35             # tune this (0–255) if QR codes are blurry at your scanning distance
 
 yolo:
   model: "runs/inventory/spool_detector_v15/weights/best.pt"

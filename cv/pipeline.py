@@ -222,6 +222,27 @@ class CVPipeline:
                             self.track_qr_cache[best_tid] = {"raw": qr["raw"], "payload": payload}
                             self.track_qr_last_seen[best_tid] = self.frame_i
 
+        # Per-spool ROI zoom pass — zooms into each spool bbox 4x to catch small QR codes
+        # that the full-frame pass misses. Assigns directly to that track (no distance matching).
+        if self.qr_enabled and self.qr_reader is not None:
+            for t in tracks_out:
+                tid = t["track_id"]
+                # skip if we already got a fresh decode this frame
+                if self.track_qr_last_seen.get(tid) == self.frame_i:
+                    continue
+                roi_results = self.qr_reader.decode_roi_zoomed(
+                    frame_bgr, t["bbox"], pad=20, zoom=4.0
+                )
+                for qr in roi_results:
+                    payload = qr.get("payload")
+                    if not isinstance(payload, dict):
+                        continue
+                    if not payload.get("id"):
+                        continue
+                    self.track_qr_cache[tid] = {"raw": qr["raw"], "payload": payload}
+                    self.track_qr_last_seen[tid] = self.frame_i
+                    break
+
         # Expire QR cache for tracks whose QR hasn't been seen for qr_persist_frames
         if self.qr_enabled:
             expired = [

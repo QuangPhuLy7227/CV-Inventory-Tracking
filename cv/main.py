@@ -20,7 +20,7 @@ def main():
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(cam_cfg["height"]))
     cap.set(cv2.CAP_PROP_FPS, int(cam_cfg["fps"]))
     cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)
-    cap.set(cv2.CAP_PROP_FOCUS, 30)
+    cap.set(cv2.CAP_PROP_FOCUS, int(cam_cfg.get("focus", 30)))
     cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)   # disable auto-exposure flicker
 
     pipeline = CVPipeline("config/cv.yaml", "config/zones.json")
